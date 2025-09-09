@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Cesium ECEF & ECI Vectors</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <style>
+    html, body, #cesiumContainer {
+      width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+    }
+    .overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(0,0,0,0.5);
+      color: white;
+      padding: 8px;
+      border-radius: 6px;
+      font-family: sans-serif;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+  <div class="overlay">
+    <strong>Axes:</strong><br>
+    ECEF = fixed to Earth (red/green/blue).<br>
+    ECI = inertial frame, fixed to first point of Aries (yellow/cyan/magenta).
+  </div>
+
+
+  <script>
+    // Create the Cesium Viewer
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldAnimate: true
+    });
+    
+    // Center of Earth (slightly offset as 0,0,0 does not work)
+    const origin = new Cesium.Cartesian3(0.1, 0.1, 0.1);
+    const ariesLength = 20_000_000; // 20,000 km for Aries
+
+    // Vector length (10,000 km)
+    const length = 10_000_000;
+
+    // Define ECEF axes directions
+    const xDir = new Cesium.Cartesian3(length, 0, 0);
+    const yDir = new Cesium.Cartesian3(0, length, 0);
+    const zDir = new Cesium.Cartesian3(0, 0, length);
+
+    // Function to create a polyline vector
+  function addECEFVector(origin, direction, color, labelText) {
+    const end = Cesium.Cartesian3.add(origin, direction, new Cesium.Cartesian3());
+    viewer.entities.add({
+      polyline: {
+        positions: [origin, end],
+        width: 5,
+        material: new Cesium.ColorMaterialProperty(color),
+        arcType: Cesium.ArcType.NONE
+      },
+      label: {
+        text: labelText,
+        font: "24px sans-serif",
+        fillColor: color,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        showBackground: true,
+        backgroundColor: Cesium.Color.BLACK.withAlpha(0.5),
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -20),
+        position: end
+      },
+      position: end
+    });
+  }
+
+    // Add X (red), Y (green), Z (blue) vectors
+    addECEFVector(origin, xDir, Cesium.Color.RED, "X");
+    addECEFVector(origin, yDir, Cesium.Color.GREEN, "Y");
+    addECEFVector(origin, zDir, Cesium.Color.BLUE, "Z");
+
+    // Function to create an ECI vector with label (animated)
+    function addECIVector(origin, directionFunc, color, labelText) {
+      // Create placeholder entity
+      const entity = viewer.entities.add({
+        polyline: {
+          positions: new Cesium.CallbackProperty(function(time) {
+            const dir = directionFunc(time);
+            const end = Cesium.Cartesian3.add(origin, dir, new Cesium.Cartesian3());
+            return [origin, end];
+          }, false),
+          width: 5,
+          material: new Cesium.ColorMaterialProperty(color),
+          arcType: Cesium.ArcType.NONE
+        },
+        label: {
+          text: labelText,
+          font: "24px sans-serif",
+          fillColor: color,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          showBackground: true,
+          backgroundColor: Cesium.Color.BLACK.withAlpha(0.5),
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, 20)
+        },
+        position: new Cesium.CallbackProperty(function(time) {
+          const dir = directionFunc(time);
+          return Cesium.Cartesian3.add(origin, dir, new Cesium.Cartesian3());
+        }, false)
+      });
+      return entity;
+    }
+
+    // Compute sidereal angle (radians) for current simulation time
+    function getSiderealAngle(julianDate) {
+      const JD = Cesium.JulianDate.toDate(julianDate).getTime() / 86400000 + 2440587.5;
+      const T = (JD - 2451545.0) / 36525.0;
+      let GMST = 67310.54841 +
+        (876600.0 * 3600 + 8640184.812866) * T +
+        0.093104 * T * T -
+        6.2e-6 * T * T * T;
+      GMST = ((GMST % 86400) + 86400) % 86400;
+      return 2 * Math.PI * (GMST / 86400);
+    }
+
+    // Animated ECI axes
+    addECIVector(origin, function(time) {
+      const theta = -getSiderealAngle(time);
+      return new Cesium.Cartesian3(length * Math.cos(theta), length * Math.sin(theta), 0);
+    }, Cesium.Color.YELLOW, "X");
+
+    addECIVector(origin, function(time) {
+      const theta = -getSiderealAngle(time);
+      return new Cesium.Cartesian3(-length * Math.sin(theta), length * Math.cos(theta), 0);
+    }, Cesium.Color.CYAN, "Y");
+
+    addECIVector(origin, function(time) {
+      return new Cesium.Cartesian3(0, 0, length);
+    }, Cesium.Color.MAGENTA, "Z");
+
+    // Animated Aries vector (longer, orange, labeled ♈︎)
+    addECIVector(origin, function(time) {
+      const theta = -getSiderealAngle(time);
+      return new Cesium.Cartesian3(ariesLength * Math.cos(theta), ariesLength * Math.sin(theta), 0);
+    }, Cesium.Color.ORANGE, "♈︎");
+
+    // Fly the camera so we start in between ECI X & Y
+    const theta = -getSiderealAngle(viewer.clock.currentTime);
+    const phi = theta + Math.PI / 4; // 45 degrees ahead of ECI X
+    const radius = 50_000_000; // 50,000 km from Earth's center
+
+    const x = radius * Math.cos(phi);
+    const y = radius * Math.sin(phi);
+    const z = radius * Math.sin(Math.PI / 6); // 30 degrees elevation
+
+    viewer.camera.flyTo({
+      destination: new Cesium.Cartesian3(x, y, z)
+    });
+    
+    viewer.clock.multiplier = 3600;
+
+    function icrf(scene, time) {
+    if (scene.mode !== Cesium.SceneMode.SCENE3D) {
+        return;
+    }
+
+    var icrfToFixed = Cesium.Transforms.computeIcrfToFixedMatrix(time);
+    if (Cesium.defined(icrfToFixed)) {
+        var camera = viewer.camera;
+        var offset = Cesium.Cartesian3.clone(camera.position);
+        var transform = Cesium.Matrix4.fromRotationTranslation(icrfToFixed);
+        camera.lookAtTransform(transform, offset);
+        }
+      }
+
+    viewer.scene.postUpdate.addEventListener(icrf);
+  </script>
+</body>
+</html>
