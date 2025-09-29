@@ -2,10 +2,10 @@
 
 This folder contains demos using [CesiumJS](https://cesium.com/platform/cesiumjs/) for use in AOE 4414 - Computer Aided Space Mission Planning. Below is an overview of the main files:
 
-### `twosat.html`
+### `blacksburg_horizon.html`
 
 - **Purpose:**  
-  Visualizes two satellites in orbit above a ground station (Blacksburg, VA) using CesiumJS and [satellite.js](https://github.com/shashwatak/satellite-js).
+  Visualizes in satellites in orbit from the VT NSI telescope  using CesiumJS and [satellite.js](https://github.com/shashwatak/satellite-js).
 - **Features:**  
   - Loads two example satellites from TLE (Two-Line Element) data.
   - Propagates their orbits for 2 hours and animates their positions.
