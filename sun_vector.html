@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Sun Vector from Satellite (Kepler Elements)</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <script src="https://unpkg.com/satellite.js/dist/satellite.min.js"></script>
+  <style>
+    html, body, #cesiumContainer { width:100%; height:100%; margin:0; padding:0; overflow:hidden; }
+    .note {
+      position: absolute;
+      left: 8px;
+      top: 8px;
+      background: rgba(0,0,0,0.5);
+      color: #fff;
+      padding: 6px 8px;
+      border-radius: 4px;
+      font-family: sans-serif;
+      z-index: 2;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+  <div class="note"><strong>Sun vector</strong><br>
+    Yellow line points from satellite toward Sun.<br>
+    Orbit is circular, equatorial, 26,500 km altitude.<br>
+    Satellite position is propagated using Keplerian elements.
+  </div>
+
+  <script type="module">
+    const viewer = new Cesium.Viewer('cesiumContainer', {
+      shouldAnimate: true,
+      timeline: true,
+      animation: true
+    });
+
+    viewer.scene.globe.enableLighting = true; // Enables Dynamic Lighting
+
+    // Constants
+    const mu = 398600.4418; // Earth mu km^3/s^2
+    const AU_KM = 149597870.7;
+    const R_E = 6378137; // Earth radius in meters
+    const toRad = d => d * Math.PI / 180.0;
+
+    // Hardcoded Keplerian elements
+    const elements = {
+      a_km: 26500,  // semi-major axis km
+      e: 0,         // eccentricity
+      iDeg: 0,      // inclination deg
+      raanDeg: 0,   // RAAN deg
+      argpDeg: 0,   // argument of perigee deg
+      M0Deg: 0      // mean anomaly at epoch deg
+    };
+
+    // Julian Date Functions
+    function dateToJulianDate(date) {
+      return date.getTime() / 86400000.0 + 2440587.5;
+    }
+    function julianCenturies(JD) {
+      return (JD - 2451545.0) / 36525.0;
+    }
+
+    // Simple Sun position in geocentric ECI (km)
+    function sunPositionEci(date) {
+      const JD = dateToJulianDate(date);
+      const T = julianCenturies(JD);
+      const M = (357.52911 + 35999.05029 * T - 0.0001537 * T * T) % 360;
+      const L0 = (280.46646 + 36000.76983 * T + 0.0003032 * T * T) % 360;
+      const C = (1.914602 - 0.004817 * T - 0.000014 * T * T) * Math.sin(toRad(M))
+              + (0.019993 - 0.000101 * T) * Math.sin(toRad(2*M))
+              + 0.000289 * Math.sin(toRad(3*M));
+      const trueLong = L0 + C;
+      const eps = 23.439291 - 0.0130042 * T;
+      const R_au = 1.00014 - 0.01671 * Math.cos(toRad(M)) - 0.00014 * Math.cos(toRad(2*M));
+      const r = R_au * AU_KM;
+      const lambda = toRad(trueLong);
+      const beta = 0;
+      const epsRad = toRad(eps);
+
+      const x = r * Math.cos(lambda) * Math.cos(beta);
+      const y = r * Math.sin(lambda) * Math.cos(beta);
+      const z = r * Math.sin(beta);
+
+      // rotate to equatorial
+      const xe = x;
+      const ye = y * Math.cos(epsRad) - z * Math.sin(epsRad);
+      const ze = y * Math.sin(epsRad) + z * Math.cos(epsRad);
+
+      return { x: xe, y: ye, z: ze };
+    }
+
+    // Kepler’s equation w/ Newton-Raphson 
+    function solveKepler(M, e, tol = 1e-12) {
+      let E = M;
+      let delta = 1;
+      while (Math.abs(delta) > tol) {
+        delta = (E - e*Math.sin(E) - M) / (1 - e*Math.cos(E));
+        E -= delta;
+      }
+      return E;
+    }
+
+    // Classical elements -> ECI (km)
+    function keplerToEci(a, e, iDeg, raanDeg, argpDeg, M0Deg, epochDate, targetDate) {
+      const dt = (targetDate.getTime() - epochDate.getTime()) / 1000.0;
+      const n = Math.sqrt(mu / Math.pow(a, 3)); // rad/s
+      const M0 = toRad(M0Deg);
+      const M = M0 + n * dt;
+      const Mnorm = ((M % (2.0 * Math.PI)) + 2.0 * Math.PI) % (2.0 * Math.PI);
+      const E = solveKepler(Mnorm, e);
+      const x_pf = a * (Math.cos(E) - e);
+      const y_pf = a * Math.sqrt(Math.max(0,1 - e*e)) * Math.sin(E);
+
+      const i = toRad(iDeg), raan = toRad(raanDeg), argp = toRad(argpDeg);
+      const cosO = Math.cos(raan), sinO = Math.sin(raan);
+      const cosi = Math.cos(i), sini = Math.sin(i);
+      const cosw = Math.cos(argp), sinw = Math.sin(argp);
+
+      const R11 = cosO * cosw - sinO * sinw * cosi;
+      const R12 = -cosO * sinw - sinO * cosw * cosi;
+      const R13 = sinO * sini;
+
+      const R21 = sinO * cosw + cosO * sinw * cosi;
+      const R22 = -sinO * sinw + cosO * cosw * cosi;
+      const R23 = -cosO * sini;
+
+      const R31 = sinw * sini;
+      const R32 = cosw * sini;
+      const R33 = cosi;
+
+      const x = R11 * x_pf + R12 * y_pf + R13 * 0;
+      const y = R21 * x_pf + R22 * y_pf + R23 * 0;
+      const z = R31 * x_pf + R32 * y_pf + R33 * 0;
+      return { x, y, z };
+    }
+
+    const epochDate = new Date(); // now
+
+    // Build orbit + satellite + sun-vector 
+    (function buildOrbit() {
+      const a_km = elements.a_km;
+      const e = elements.e;
+      const iDeg = elements.iDeg;
+      const raanDeg = elements.raanDeg;
+      const argpDeg = elements.argpDeg;
+      const M0Deg = elements.M0Deg;
+
+      const period = 4 * Math.PI * Math.sqrt(Math.pow(a_km, 3) / mu);
+
+      // sample orbit in ECI and convert to ECEF/Cesium positions
+      const samples = [];
+      const sampleCount = 720;
+      for (let idx = 0; idx <= sampleCount; idx++) {
+        const frac = idx / sampleCount;
+        const tSec = frac * period;
+        const date = new Date(epochDate.getTime() + tSec * 1000);
+        const posEciKm = keplerToEci(a_km, e, iDeg, raanDeg, argpDeg, M0Deg, epochDate, date);
+        const gmst = satellite.gstime(date);
+        const ecf = satellite.eciToEcf({ x: posEciKm.x, y: posEciKm.y, z: posEciKm.z }, gmst);
+        const posCesium = new Cesium.Cartesian3(ecf.x * 1000, ecf.y * 1000, ecf.z * 1000);
+        samples.push({ time: Cesium.JulianDate.fromDate(date), position: posCesium, eciKm: posEciKm, date });
+      }
+
+      // satellite sampled position
+      const satPosProp = new Cesium.SampledPositionProperty();
+      samples.forEach(s => satPosProp.addSample(s.time, s.position));
+      satPosProp.setInterpolationOptions({ interpolationDegree: 5 });
+
+      // orbit polyline
+      const linePositions = samples.map(s => s.position);
+      viewer.entities.add({
+        polyline: {
+          positions: linePositions,
+          width: 2,
+          material: new Cesium.PolylineGlowMaterialProperty({color: Cesium.Color.CYAN }),
+          arcType: Cesium.ArcType.NONE
+        }
+      });
+
+      // satellite entity
+      viewer.entities.add({
+        position: satPosProp,
+        point: { pixelSize: 10, color: Cesium.Color.ORANGE },
+        label: { text: 'Satellite', font: '14px sans-serif', fillColor: Cesium.Color.WHITE, pixelOffset: new Cesium.Cartesian2(0, -18) },
+        path: { show: true, leadTime: 0, trailTime: period, width: 2, material: Cesium.Color.ORANGE.withAlpha(0.6) }
+      });
+
+      // sun vector from satellite pointing toward Sun
+      viewer.entities.add({
+        polyline: {
+          positions: new Cesium.CallbackProperty((time, result) => {
+            const satPos = satPosProp.getValue(time, result);
+            if (!satPos) return null;
+
+            const jsDate = Cesium.JulianDate.toDate(time);
+
+            // Sun ECI (km) -> ECEF (km) using satellite.gstime
+            const sunEci = sunPositionEci(jsDate);
+            const gmst = satellite.gstime(jsDate);
+            const sunEcf = satellite.eciToEcf({ x: sunEci.x, y: sunEci.y, z: sunEci.z }, gmst);
+            const sunCesium = new Cesium.Cartesian3(sunEcf.x * 1000, sunEcf.y * 1000, sunEcf.z * 1000);
+
+            // direction from satellite to sun
+            const dir = Cesium.Cartesian3.subtract(sunCesium, satPos, new Cesium.Cartesian3());
+            Cesium.Cartesian3.normalize(dir, dir);
+
+            // scale for visibility 
+            const scale = 3.0 * R_E;
+            const end = Cesium.Cartesian3.add(satPos, Cesium.Cartesian3.multiplyByScalar(dir, scale, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+
+            return [satPos, end];
+          }, false),
+          width: 3,
+          material: new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW),
+          arcType: Cesium.ArcType.NONE
+        }
+      });
+      
+      // Cesium timeline and clock
+      const startJD = Cesium.JulianDate.fromDate(epochDate);
+      const stopJD = Cesium.JulianDate.fromDate(new Date(epochDate.getTime() + period * 1000));
+      viewer.clock.startTime = startJD.clone();
+      viewer.clock.stopTime = stopJD.clone();
+      viewer.clock.currentTime = startJD.clone();
+      viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+      viewer.clock.multiplier = Math.max(1, 2*Math.round(period / 60)); 
+      if (viewer.timeline) {
+        viewer.timeline.zoomTo(startJD, stopJD);
+      }
+
+      // Set camera to see full orbit and Sun
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(-80.419, 15, 75000000),
+        orientation: {
+            heading: Cesium.Math.toRadians(0),
+            pitch: Cesium.Math.toRadians(-90),
+        },
+        });
+    })();  
+  </script>
+</body>
+</html>

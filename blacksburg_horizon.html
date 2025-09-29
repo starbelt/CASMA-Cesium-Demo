@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Satellite from NSI Ground Station</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <script src="https://unpkg.com/satellite.js/dist/satellite.min.js"></script> <!-- satellite, used for propogation -->
+  <style>
+    html, body, #cesiumContainer {
+      width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+    }
+    .overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(0,0,0,0.5);
+      color: white;
+      padding: 8px;
+      border-radius: 6px;
+      font-family: sans-serif;
+      z-index: 1;
+    }
+    /* Camera HPR display */
+   .camera-hpr {
+     position: absolute;
+     top: 50px;
+     left: 8px;
+     background: rgba(0,0,0,0.6);
+     color: #fff;
+     padding: 8px 10px;
+     border-radius: 6px;
+     font-family: sans-serif;
+     font-size: 13px;
+     line-height: 1.2;
+     z-index: 2;
+     text-align: left;
+     min-width: 120px;
+   }
+  </style>
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+  <div class="overlay">
+    Select satellites in Blacksburg's North Horizon.<br>
+  </div>
+  <div id="cameraHpr" class="camera-hpr">Heading: <br>Pitch: <br>Roll: </div>
+
+  <script type="module">
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldAnimate: true,
+      terrain: Cesium.Terrain.fromWorldTerrain(),
+      infoBox: false,
+      selectionIndicator: false
+    });
+
+    // Add ground  markers
+    viewer.entities.add({
+      name: "Burrus",
+      position: Cesium.Cartesian3.fromDegrees(-80.42425, 37.22905, 629),
+      point: { pixelSize: 10, color: Cesium.Color.White },
+      label: {
+        text: "Burrus Hall",
+        font: "14px sans-serif",
+        fillColor: Cesium.Color.White,
+        showBackground: true,
+        backgroundColor: new Cesium.Color(0.1, 0.1, 0.1, 0.7),
+        pixelOffset: new Cesium.Cartesian2(0, -20)
+      }
+    });
+    
+    viewer.entities.add({
+      name: "Newman",
+      position: Cesium.Cartesian3.fromDegrees(-80.419656, 37.227944, 631),
+      point: { pixelSize: 10, color: Cesium.Color.White },
+      label: {
+        text: "Newman Library",
+        font: "14px sans-serif",
+        fillColor: Cesium.Color.White,
+        showBackground: true,
+        backgroundColor: new Cesium.Color(0.1, 0.1, 0.1, 0.7),
+        pixelOffset: new Cesium.Cartesian2(0, -20)
+      }
+    });
+
+    // Example TLEs
+    const tleData = [
+      {
+        name: "Starlink (LEO)",
+        tle1: "1 62208U 24229S   25270.75848417  .00058562  00000+0  21178-2 0  9993",
+        tle2: "2 62208  43.0021 110.8214 0002033 309.0138  51.0532 15.27626011 45645",
+        color: Cesium.Color.YELLOW
+      },
+      {
+        name: "Starlink (LEO)",
+        tle1: "1 62047U 24216R   25270.88890542  .00053071  00000+0  19223-2 0  9998",
+        tle2: "2 62047  42.9967 102.9759 0001412 274.6657  85.4033 15.27612217 48892",
+        color: Cesium.Color.YELLOW
+      },
+      {
+        name: "Starlink (LEO)",
+        tle1: "1 55334U 23013D   25268.01657085  .00001013  00000+0  90062-4 0  9999",
+        tle2: "2 55334  43.0006 120.8214 0001146 256.0098 104.0617 15.02523040146782",
+        color: Cesium.Color.YELLOW
+      },
+      {
+        name: "Starlink (LEO)",
+        tle1: "1 62020U 24213N   25270.91157787 -.00003359  00000+0 -22785-4 0  9992",
+        tle2: "2 62020  53.1578 123.3613 0002120 157.7448 202.3663 15.69783839 49353",
+        color: Cesium.Color.YELLOW
+      },
+      {
+        name: "Starlink (LEO)",
+        tle1: "1 61666U 24193F   25270.89160638  .00001591  00000+0  65823-4 0  9994",
+        tle2: "2 61666  53.1595 127.0354 0000865  75.8431 284.2666 15.30199322 51605",
+        color: Cesium.Color.YELLOW
+      },
+      {
+        name: "Starlink (LEO)",
+        tle1: "1 53412U 22097AA  25271.01296911  .00000292  00000+0  36458-4 0  9993",
+        tle2: "2 53412  53.2174 124.4040 0001301 101.0963 259.0176 15.08843169174095",
+        color: Cesium.Color.YELLOW
+      },
+      {
+        name: "BREEZE-M R/B (HEO)",
+        tle1: "1 47242U 20097A   25271.16811243 -.00000107  00000+0  00000+0 0  9997",
+        tle2: "2 47242   4.6494  79.9312 0082594 270.7813  88.5026  0.95298284 16772",
+        color: Cesium.Color.CYAN
+      },
+      {
+        name: "INTELSAT 4-F7 (GEO)",
+        tle1: "1 06796U 73058A   25270.62342962  .00000051  00000-0  00000-0 0  9997",
+        tle2: "2 06796   7.8482 298.9503 0005839 221.6615 319.1696  0.99143152133043",
+        color: Cesium.Color.LIME
+      },
+      {
+        name: "SPOT 7 (LEO)",
+        tle1: "1 40053U 14034A   25271.25168918  .00001083  00000+0  23224-3 0  9998",
+        tle2: "2 40053  98.1010 335.0316 0001199  81.7312 278.4024 14.60583589598891",
+        color: Cesium.Color.YELLOW
+      },
+      {
+        name: "ZIYUAN 1-02C (LEO)",
+        tle1: "1 38038U 11079A   25271.32968979  .00000899  00000+0  31239-3 0  9996",
+        tle2: "2 38038  98.4430 338.7019 0006701  21.4631  67.9453 14.37882494721570",
+        color: Cesium.Color.YELLOW
+      },
+    ];
+
+    // Convert ECI (km) → Cesium Cartesian3 ECEF (m)
+    function eciToCesium(eci, gmst) {
+      const ecf = satellite.eciToEcf(eci, gmst);
+      return new Cesium.Cartesian3(
+        ecf.x * 1000,
+        ecf.y * 1000,
+        ecf.z * 1000
+      );
+    }
+
+    // Create dynamic satellite entity
+    function createSatelliteEntity(satrec, name, color, start) {
+      const position = new Cesium.SampledPositionProperty();
+      const stop = Cesium.JulianDate.addHours(start, 2, new Cesium.JulianDate());
+
+      // Sample positions every minute for 2 hours
+      for (let i = 0; i <= 120; i++) {
+        const time = Cesium.JulianDate.addMinutes(start, i, new Cesium.JulianDate());
+        const jsDate = Cesium.JulianDate.toDate(time);
+
+        const pv = satellite.propagate(
+          satrec,
+          jsDate.getUTCFullYear(),
+          jsDate.getUTCMonth() + 1,
+          jsDate.getUTCDate(),
+          jsDate.getUTCHours(),
+          jsDate.getUTCMinutes(),
+          jsDate.getUTCSeconds()
+        );
+
+        if (pv.position) {
+          const gmst = satellite.gstime(jsDate);
+          const pos = eciToCesium(pv.position, gmst);
+          position.addSample(time, pos);
+        }
+      }
+
+      position.setInterpolationOptions({
+        interpolationAlgorithm: Cesium.LagrangePolynomialApproximation,
+        interpolationDegree: 5
+      });
+
+      return viewer.entities.add({
+        name: name,
+        availability: new Cesium.TimeIntervalCollection([
+          new Cesium.TimeInterval({ start, stop })
+        ]),
+        position: position,
+        point: { pixelSize: 10, color: color },
+        label: {
+          text: name,
+          font: "14px sans-serif",
+          fillColor: color,
+          showBackground: true,
+          backgroundColor: new Cesium.Color(0, 0, 0, 0.6),
+          pixelOffset: new Cesium.Cartesian2(0, -20)
+        },
+        path: {
+          show: true,
+          leadTime: 0,
+          trailTime: 600,
+          width: 2,
+          material: color
+        }
+      });
+    }
+    
+    // Hard-coded UTC date: 2025-09-28
+    const fixedDateUTC = new Date(Date.UTC(2025, 8, 28, 16, 18, 0));  // months is 0-indexed
+    const start = Cesium.JulianDate.fromDate(fixedDateUTC);
+    const stop = Cesium.JulianDate.addHours(start, 0.3, new Cesium.JulianDate());
+
+    // Create entities from TLEs
+    tleData.forEach(sat => {
+      const satrec = satellite.twoline2satrec(sat.tle1, sat.tle2);
+      createSatelliteEntity(satrec, sat.name, sat.color, start);
+    });
+
+    // Cesium clock
+    viewer.clock.startTime = start.clone();
+    viewer.clock.stopTime = stop.clone();
+    viewer.clock.currentTime = start.clone();
+    viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+    viewer.clock.multiplier = 30;
+    viewer.timeline.zoomTo(start, stop);
+
+    // Set camera to Blacksburg looking north
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(-80.419, 37.207, 700), 
+      orientation: {
+        heading: Cesium.Math.toRadians(0),
+        pitch: Cesium.Math.toRadians(7), 
+        roll: Cesium.Math.toRadians(0)
+      }
+    });
+
+    // live camera Heading / Pitch / Roll display (degrees)
+    (function addCameraHprDisplay() {
+      const el = document.getElementById('cameraHpr');
+      if (!el) return;
+      function update() {
+        const cam = viewer.camera;
+        // Use 0 fallback in case values are undefined
+        const h = Cesium.Math.toDegrees(typeof cam.heading === 'number' ? cam.heading : 0);
+        const p = Cesium.Math.toDegrees(typeof cam.pitch === 'number' ? cam.pitch : 0);
+        const r = Cesium.Math.toDegrees(typeof cam.roll === 'number' ? cam.roll : 0);
+        el.innerHTML = `Heading: ${h.toFixed(2)}°<br>Pitch: ${p.toFixed(2)}°<br>Roll: ${r.toFixed(2)}°`;
+      }
+      // update every frame
+      viewer.scene.postRender.addEventListener(update);
+      update();
+    })();
+
+  </script>
+</body>
+</html>

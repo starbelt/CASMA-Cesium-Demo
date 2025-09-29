@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Kepler's 2nd Law – Equal Areas</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <style>
+    html, body, #cesiumContainer {
+      width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+    }
+    .overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(0,0,0,0.5);
+      color: white;
+      padding: 8px;
+      border-radius: 6px;
+      font-family: sans-serif;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+  <div class="overlay">
+    <strong>Kepler's 2nd Law:</strong><br>
+    A line segment joining a satellite and the focus of orbit sweeps out equal areas during equal intervals of time.    
+  </div>
+  <script>
+    // Initialize viewer with no Earth or timeline
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldAnimate: true,
+      skyBox: false,
+      skyAtmosphere: false,
+      baseLayerPicker: false,
+      timeline: false,
+      animation: false,
+      globe: false,
+      sceneModePicker: false
+    });
+
+    // Orbit parameters
+    const semiMajorAxis = 20000000; // meters
+    const eccentricity = 0.8;
+    const inclination = 0;
+    const orbitalPeriod = 12 * 3600; // 12 hours
+
+    // Time range
+    const start = Cesium.JulianDate.now();
+    const stop = Cesium.JulianDate.addSeconds(start, orbitalPeriod, new Cesium.JulianDate());
+
+    viewer.clock.startTime = start.clone();
+    viewer.clock.stopTime = stop.clone();
+    viewer.clock.currentTime = start.clone();
+    viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+    viewer.clock.multiplier = 5000;
+
+    // Generate orbit samples
+    const positionProperty = new Cesium.SampledPositionProperty();
+    const orbitPositions = [];
+    const steps = 720;
+    const b = semiMajorAxis * Math.sqrt(1 - eccentricity*eccentricity);
+  for (let i = 0; i <= steps; i++) {
+    const time = Cesium.JulianDate.addSeconds(start, (i/steps) * orbitalPeriod, new Cesium.JulianDate());
+    const M = 2 * Math.PI * (i / steps);
+    const E = solveKepler(M, eccentricity);
+
+    // Centered ellipse parameterization
+    const x = semiMajorAxis * Math.cos(E);
+    const y = b * Math.sin(E);
+    const z = 0;
+
+    const vec = new Cesium.Cartesian3(x, y, z);
+
+    positionProperty.addSample(time, vec);
+    orbitPositions.push(vec);
+  }
+
+
+    // Draw full orbit ellipse
+    viewer.entities.add({
+      polyline: {
+        positions: orbitPositions,
+        width: 2,
+        material: Cesium.Color.GRAY
+      }
+    });
+
+    // Add satellite
+    const satellite = viewer.entities.add({
+      position: positionProperty,
+      point: { pixelSize: 10, color: Cesium.Color.YELLOW }
+    });
+
+    // Add focus point
+    const focusDistance = semiMajorAxis * eccentricity;
+    const focusEntity = viewer.entities.add({
+      position: new Cesium.Cartesian3(focusDistance, 0, 0),
+      point: { pixelSize: 12, color: Cesium.Color.ORANGE }
+    });
+
+    const centerEntity = viewer.entities.add({
+      position: new Cesium.Cartesian3(0, 0, 0),
+      point: { pixelSize: 1, color: Cesium.Color.GREEN }
+    });
+
+    // Number of polygons along the orbit
+    const numTriangles = 10;
+
+    // Number of points per orbit segment for smooth edges
+    const segmentPoints = 20;
+
+    // Time interval per polygon
+    const dt = orbitalPeriod / numTriangles;
+
+      const focus = new Cesium.Cartesian3(focusDistance, 0, 0);
+
+    // Loop over the orbit and create polygons
+    for (let i = 0; i < numTriangles; i++) {
+      const points = [focus]; // start polygon with focus point
+
+      // Sample multiple points along this segment of the orbit
+      for (let j = 0; j <= segmentPoints; j++) {
+        const t = Cesium.JulianDate.addSeconds(
+          start,
+          i * dt + (j / segmentPoints) * dt,
+          new Cesium.JulianDate()
+        );
+        const p = positionProperty.getValue(t);
+        points.push(p);
+      }
+
+      // Choose color: magenta if i is even, cyan if odd
+      const color = (i % 2 === 0) ? Cesium.Color.MAGENTA.withAlpha(0.5)
+                                  : Cesium.Color.CYAN.withAlpha(0.5);
+
+      // Create polygon using the focus and sampled points
+      viewer.entities.add({
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(points),
+          material: color,
+          perPositionHeight: true
+        }
+      });
+    }
+
+    // Kepler’s equation w/ Newton-Raphson 
+    function solveKepler(M, e, tol = 1e-12) {
+      let E = M;
+      let delta = 1;
+      while (Math.abs(delta) > tol) {
+        delta = (E - e*Math.sin(E) - M) / (1 - e*Math.cos(E));
+        E -= delta;
+      }
+      return E;
+    }
+
+    // Look straight down at orbit plane
+    viewer.camera.setView({
+      destination: new Cesium.Cartesian3(0, 0, semiMajorAxis * 4),
+      orientation: {
+        heading: Cesium.Math.toRadians(0),
+        pitch: Cesium.Math.toRadians(-90),
+        roll: Cesium.Math.toRadians(-90)
+      }
+    });
+
+  </script>
+</body>
+</html>

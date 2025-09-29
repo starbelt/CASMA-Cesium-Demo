@@ -27,7 +27,8 @@
   <div class="overlay">
     <strong>Axes:</strong><br>
     ECEF = fixed to Earth (red/green/blue).<br>
-    ECI = inertial frame, fixed to first point of Aries (yellow/cyan/magenta).
+    ECI = inertial frame, fixed to first point of Aries (yellow/cyan/magenta).<br><br>
+    <button id="vernalEquinoxButton">Vernal Equinox 2026</button>
   </div>
 
 
@@ -36,6 +37,8 @@
     const viewer = new Cesium.Viewer("cesiumContainer", {
       shouldAnimate: true
     });
+
+    viewer.scene.globe.enableLighting = true;
     
     // Center of Earth (slightly offset as 0,0,0 does not work)
     const origin = new Cesium.Cartesian3(0.1, 0.1, 0.1);
@@ -178,6 +181,16 @@
       }
 
     viewer.scene.postUpdate.addEventListener(icrf);
+
+    // Jump to Vernal Equinox 2026 on button click
+    document.getElementById('vernalEquinoxButton').addEventListener('click', function() {
+      const vernalEquinoxDate = new Date(Date.UTC(2026, 2, 20, 10, 46, 0)); // months is 0-indexed
+      const julianDate = Cesium.JulianDate.fromDate(vernalEquinoxDate);
+
+      viewer.clock.currentTime = julianDate;
+
+      viewer.clock.shouldAnimate = false; // Pause Animation
+  });
   </script>
 </body>
 </html>
