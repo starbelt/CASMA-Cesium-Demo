@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Satellite Sun Visability</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <script src="https://unpkg.com/satellite.js/dist/satellite.min.js"></script> <!-- satellite, used for propogation -->
+  <style>
+    html, body, #cesiumContainer {
+      width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+    }
+    .overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(0,0,0,0.5);
+      color: white;
+      padding: 8px;
+      border-radius: 6px;
+      font-family: sans-serif;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="cesiumContainer"></div>
+  <div class="overlay">
+    <label for="satSelect">Follow satellite:</label>
+    <select id="satSelect"></select>
+  </div>
+
+  <script type="module">
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      timeline: true,
+      shouldAnimate: true,
+      animation: true
+    });
+ 
+    viewer.scene.globe.enableLighting = true; // Enables Dynamic Lighting
+
+  // TLEs
+  const tleData = [
+      {
+        name: "ISS (LEO)",
+        tle1: "1 25544U 98067A   25292.49238527  .00016769  00000+0  30915-3 0  9999",
+        tle2: "2 25544  51.6341  51.0415 0004290 310.7772  49.2843 15.49246617534445",
+        color: Cesium.Color.BLUE,
+        info: `The International Space Station (ISS) is a large, habitable satellite in low Earth orbit, developed as a joint project between NASA, Roscosmos, ESA, JAXA, and CSA. 
+        Launched in stages starting in 1998, it serves as a microgravity laboratory for scientific research across various disciplines, including biology, physics, and astronomy.`
+      },
+      {
+        name: "ERS-1 (SSO)",
+        tle1: "1 21574U 91050A   25292.30544635  .00000600  00000+0  20726-3 0  9999",
+        tle2: "2 21574  98.7940 301.9886 0030913 261.4848  98.2835 14.39302736795398",
+        color: Cesium.Color.YELLOW,
+        info: `ERS-1 (European Remote Sensing Satellite-1) was the first environmental monitoring satellite 
+        developed by the European Space Agency (ESA). Launched on July 17, 1991, it was designed to monitor the Earth's environment and oceans using advanced radar instruments.`
+    },
+      {
+        name: "NAVSTAR 83 (MEO)",
+        tle1: "1 62339U 24242A   25290.54198530 -.00000097  00000+0  00000+0 0  9995",
+        tle2: "2 62339  54.9394 344.0177 0009308 341.2377  21.0929  2.00566620  6390",
+        color: Cesium.Color.PURPLE,
+        info: `NAVSTAR 83, also known as GPS IIR-10 or SVN-47, is part of the U.S. Global Positioning System (GPS) satellite constellation. 
+        Launched on December 21, 2003, it provides precise positioning, navigation, and timing services for military and civilian users worldwide. 
+        As a Block IIR satellite, it introduced improvements in signal reliability and accuracy over previous generations.`
+      },
+      {
+        name: "GOES 19 (GEO)",
+        tle1: "1 62020U 24213N   25270.91157787 -.00003359  00000+0 -22785-4 0  9992",
+        tle2: "2 60133   0.0055  99.2692 0000884 182.4555 125.4904  1.00267769  4548",
+        color: Cesium.Color.GREEN,
+        info: `GOES-19, formerly known as GOES-T, is a geostationary weather satellite operated by NOAA as part of the Geostationary Operational Environmental Satellite (GOES) system. 
+        Launched on March 1, 2022, it monitors weather conditions, severe storms, wildfires, and solar activity across the Western Hemisphere. 
+        GOES-19 provides advanced imagery and atmospheric data crucial for weather forecasting and disaster response.`
+      },
+    ];
+
+    // Convert ECI (km) → Cesium Cartesian3 ECEF (m)
+    function eciToCesium(eci, gmst) {
+      const ecf = satellite.eciToEcf(eci, gmst);
+      return new Cesium.Cartesian3(
+        ecf.x * 1000,
+        ecf.y * 1000,
+        ecf.z * 1000
+      );
+    }
+
+    // Create dynamic satellite entity
+    function createSatelliteEntity(satrec, name, color, start) {
+      const position = new Cesium.SampledPositionProperty();
+      const stop = Cesium.JulianDate.addHours(start, 24, new Cesium.JulianDate());
+
+      // Sample positions every minute for 24 hours
+      for (let i = 0; i <= 24*60; i++) {
+        const time = Cesium.JulianDate.addMinutes(start, i, new Cesium.JulianDate());
+        const jsDate = Cesium.JulianDate.toDate(time);
+
+        const pv = satellite.propagate(
+          satrec,
+          jsDate.getUTCFullYear(),
+          jsDate.getUTCMonth() + 1,
+          jsDate.getUTCDate(),
+          jsDate.getUTCHours(),
+          jsDate.getUTCMinutes(),
+          jsDate.getUTCSeconds()
+        );
+
+        if (pv.position) {
+          const gmst = satellite.gstime(jsDate);
+          const pos = eciToCesium(pv.position, gmst);
+          position.addSample(time, pos);
+        }
+      }
+
+      position.setInterpolationOptions({
+        interpolationAlgorithm: Cesium.LagrangePolynomialApproximation,
+        interpolationDegree: 5
+      });
+
+      // The label text will be dynamically updated to show both name and sun visible
+        return viewer.entities.add({
+          name: name,
+          availability: new Cesium.TimeIntervalCollection([
+            new Cesium.TimeInterval({ start, stop })
+          ]),
+          position: position,
+          point: { pixelSize: 10, color: color },
+          label: {
+            text: name, // will be updated dynamically
+            font: "bold 16px sans-serif",
+            showBackground: true,
+            backgroundColor: new Cesium.Color(0, 0, 0, 0.7),
+            pixelOffset: new Cesium.Cartesian2(0, -40)
+          },
+          path: {
+            show: true,
+            leadTime: 0,
+            trailTime: 60*12,
+            width: 2,
+            material: color
+          },
+          description: arguments[4] || ''
+        });
+    }
+    
+    // Hard-coded UTC date: 2025-10-19
+    const fixedDateUTC = new Date(Date.UTC(2025, 9, 19, 11, 45, 0));  // months is 0-indexed
+    const start = Cesium.JulianDate.fromDate(fixedDateUTC);
+    const stop = Cesium.JulianDate.addHours(start, 24, new Cesium.JulianDate());
+
+
+    // Store entities by name
+    const satEntities = {};
+    tleData.forEach(sat => {
+      const satrec = satellite.twoline2satrec(sat.tle1, sat.tle2);
+      const entity = createSatelliteEntity(satrec, sat.name, sat.color, start, sat.info);
+      satEntities[sat.name] = { entity, satrec };
+    });
+
+    // Populate dropdown
+    const satSelect = document.getElementById('satSelect');
+    tleData.forEach(sat => {
+      const opt = document.createElement('option');
+      opt.value = sat.name;
+      opt.textContent = sat.name;
+      satSelect.appendChild(opt);
+    });
+
+    // Camera follow logic
+    function followSatellite(name) {
+      const sat = satEntities[name];
+      if (sat) {
+        viewer.trackedEntity = sat.entity;
+      }
+    }
+    satSelect.addEventListener('change', e => followSatellite(e.target.value));
+    // Default to ISS
+    followSatellite(tleData[0].name);
+
+    // Sun ECI calculation (Using Cesium Sun position)
+    function getSunEciKm(julianDate) {
+      const sunPos = Cesium.Simon1994PlanetaryPositions.computeSunPositionInEarthInertialFrame(julianDate);
+      return [sunPos.x/1000, sunPos.y/1000, sunPos.z/1000];
+    }
+
+    // Sun Fraction Visible Calculation
+    function sunFracVisible(eciSatKm, eciSunKm) {
+      const R_E_KM = 6378.137;
+      const R_S_KM = 695700.0;
+      function mag(v) { return Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); }
+      function dot(a,b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+      const satToEarth = [-eciSatKm[0], -eciSatKm[1], -eciSatKm[2]];
+      const satToSun = [eciSunKm[0]-eciSatKm[0], eciSunKm[1]-eciSatKm[1], eciSunKm[2]-eciSatKm[2]];
+      const rho_E = mag(satToEarth);
+      const rho_S = mag(satToSun);
+      const theta_E = Math.asin(R_E_KM/rho_E);
+      const theta_S = Math.asin(R_S_KM/rho_S);
+      const theta = Math.acos(dot(satToEarth,satToSun)/(rho_E*rho_S));
+      if (theta_E+theta_S <= theta) return 1.0;
+      if (theta < theta_E-theta_S) return 0.0;
+      const a_O =
+        (theta_S**2)*Math.acos((theta**2+theta_S**2-theta_E**2)/(2*theta*theta_S))+
+        (theta_E**2)*Math.acos((theta**2+theta_E**2-theta_S**2)/(2*theta*theta_E))-
+        (0.5*Math.sqrt((-theta+theta_S+theta_E)*(theta+theta_S-theta_E)*(theta-theta_S+theta_E)*(theta+theta_S+theta_E)));
+      const a_S = Math.PI*theta_S**2;
+      return Math.max(0, Math.min(1, (a_S-a_O)/a_S));
+    }
+
+    // Update each satellite's label every frame to show name and sun visible
+    viewer.scene.preRender.addEventListener(function() {
+      const jd = viewer.clock.currentTime;
+      tleData.forEach(sat => {
+        const satObj = satEntities[sat.name];
+        if (!satObj) return;
+        const jsDate = Cesium.JulianDate.toDate(jd);
+        const pv = satellite.propagate(
+          satObj.satrec,
+          jsDate.getUTCFullYear(),
+          jsDate.getUTCMonth()+1,
+          jsDate.getUTCDate(),
+          jsDate.getUTCHours(),
+          jsDate.getUTCMinutes(),
+          jsDate.getUTCSeconds()
+        );
+        if (!pv.position) return;
+        const eciSatKm = [pv.position.x, pv.position.y, pv.position.z];
+        const eciSunKm = getSunEciKm(jd);
+        const frac = sunFracVisible(eciSatKm, eciSunKm);
+        // Update the label text to show both name and sun visible
+        satObj.entity.label.text = `${sat.name}\nSun visible: ${(frac*100).toFixed(1)}%`;
+      });
+    });
+
+    // Cesium clock
+    viewer.clock.startTime = start.clone();
+    viewer.clock.stopTime = stop.clone();
+    viewer.clock.currentTime = start.clone();
+    viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+    viewer.clock.multiplier = 60;
+    viewer.timeline.zoomTo(start, stop);
+
+  </script>
+</body>
+</html>
