@@ -164,8 +164,9 @@
       destination: new Cesium.Cartesian3(x, y, z)
     });
     
-    viewer.clock.multiplier = 3600;
+    viewer.clock.multiplier = 3600; // 1 hour per second
 
+    // Keep camera in ICRF (ECI) frame
     function icrf(scene, time) {
     if (scene.mode !== Cesium.SceneMode.SCENE3D) {
         return;
