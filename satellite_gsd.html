@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Cesium Satellite GSD</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <script src="https://unpkg.com/satellite.js/dist/satellite.min.js"></script> <!-- satellite, used for propogation -->
+  <style>
+    html, body, #cesiumContainer {
+      width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+    }
+    .overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(0,0,0,0.5);
+      color: white;
+      padding: 8px;
+      border-radius: 6px;
+      font-family: sans-serif;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+  <div class="overlay">
+    <div style="margin-bottom:8px;font-weight:bold">Satellite GSD Viewer</div>
+  <div style="font-size:13px;margin-bottom:6px">
+    Pixel size (&mu;m): <input id="pixsize" type="number" value="5" step="0.1" style="width:80px"/>
+  </div>
+  <div style="font-size:13px;margin-bottom:6px">
+    Pixel count: 
+    <input id="p_width" type="number" value="4096" min="1" step="1" style="width:80px"/> &times; 
+    <input id="p_height" type="number" value="4096" min="1" step="1" style="width:80px"/>
+  </div>
+  <div style="font-size:13px;margin-bottom:6px">Focal length (m): <input id="focal" type="number" value="0.05" step="0.001" style="width:100px"/></div>
+    <div id="info" style="margin-top:8px;font-size:12px;line-height:1.3"></div>
+  </div>
+  
+  <script>
+    // Basic Cesium viewer
+    const viewer = new Cesium.Viewer('cesiumContainer', {
+      timeline: true,
+      shouldAnimate: true,
+    });
+ 
+    // TLEs
+    const tleData = [
+        {
+            name: "ERS-1",
+            tle1: "1 21574U 91050A   25292.30544635  .00000600  00000+0  20726-3 0  9999",
+            tle2: "2 21574  98.7940 301.9886 0030913 261.4848  98.2835 14.39302736795398",
+            color: Cesium.Color.YELLOW,
+            info: `ERS-1 (European Remote Sensing Satellite-1) was the first environmental monitoring satellite 
+            developed by the European Space Agency (ESA). Launched on July 17, 1991, it was designed to monitor the Earth's environment and oceans using advanced radar instruments.`
+        },
+        ];
+
+    // Convert ECI (km) → Cesium Cartesian3 ECEF (m)
+    function eciToCesium(eci, gmst) {
+      const ecf = satellite.eciToEcf(eci, gmst);
+      return new Cesium.Cartesian3(
+        ecf.x * 1000,
+        ecf.y * 1000,
+        ecf.z * 1000
+      );
+    }
+
+    // Create dynamic satellite entity
+    function createSatelliteEntity(satrec, name, color, start) {
+      const position = new Cesium.SampledPositionProperty();
+      const stop = Cesium.JulianDate.addHours(start, 24, new Cesium.JulianDate());
+
+      // Sample positions every minute for 24 hours
+      for (let i = 0; i <= 24*60; i++) {
+        const time = Cesium.JulianDate.addMinutes(start, i, new Cesium.JulianDate());
+        const jsDate = Cesium.JulianDate.toDate(time);
+
+        const pv = satellite.propagate(
+          satrec,
+          jsDate.getUTCFullYear(),
+          jsDate.getUTCMonth() + 1,
+          jsDate.getUTCDate(),
+          jsDate.getUTCHours(),
+          jsDate.getUTCMinutes(),
+          jsDate.getUTCSeconds()
+        );
+
+        if (pv.position) {
+          const gmst = satellite.gstime(jsDate);
+          const pos = eciToCesium(pv.position, gmst);
+          position.addSample(time, pos);
+        }
+      }
+
+      position.setInterpolationOptions({
+        interpolationAlgorithm: Cesium.LagrangePolynomialApproximation,
+        interpolationDegree: 5
+      });
+
+        return viewer.entities.add({
+          name: name,
+          availability: new Cesium.TimeIntervalCollection([
+            new Cesium.TimeInterval({ start, stop })
+          ]),
+          position: position,
+          point: { pixelSize: 10, color: color },
+          label: {
+            text: name,
+            font: "bold 16px sans-serif",
+            showBackground: true,
+            backgroundColor: new Cesium.Color(0, 0, 0, 0.7),
+            pixelOffset: new Cesium.Cartesian2(0, -40)
+          },
+          path: {
+            show: true,
+            leadTime: 0,
+            trailTime: 60*12,
+            width: 2,
+            material: color
+          },
+          description: arguments[4] || ''
+        });
+    }
+    
+    // Hard-coded UTC date: 2025-10-19
+    const fixedDateUTC = new Date(Date.UTC(2025, 9, 19, 12, 25, 0));  // months is 0-indexed
+    const start = Cesium.JulianDate.fromDate(fixedDateUTC);
+    const stop = Cesium.JulianDate.addHours(start, 24, new Cesium.JulianDate());
+
+
+    // Store entities by name
+    const satEntities = {};
+    tleData.forEach(sat => {
+      const satrec = satellite.twoline2satrec(sat.tle1, sat.tle2);
+      const entity = createSatelliteEntity(satrec, sat.name, sat.color, start, sat.info);
+      satEntities[sat.name] = { entity, satrec };
+    });
+
+
+    // Camera follow logic
+    function followSatellite(name) {
+      const sat = satEntities[name];
+      if (sat) {
+        viewer.trackedEntity = sat.entity;
+      }
+    }
+
+    followSatellite(tleData[0].name);
+
+    // Cesium clock
+    viewer.clock.startTime = start.clone();
+    viewer.clock.stopTime = stop.clone();
+    viewer.clock.currentTime = start.clone();
+    viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+    viewer.clock.multiplier = 1;
+    viewer.timeline.zoomTo(start, stop);
+
+  // GSD footprint polygon (updates every second)
+  let gsdPolygon = null;
+  // Lines from each polygon corner to satellite
+  let gsdLines = [];
+
+
+    function updateGsdPolygon() {
+      try {
+        const sat = satEntities[tleData[0].name];
+        if (!sat) return;
+        const satPos = sat.entity.position.getValue(viewer.clock.currentTime);
+        if (!satPos) return;
+        const ground = Cesium.Ellipsoid.WGS84.scaleToGeodeticSurface(satPos);
+        if (!ground) return;
+
+        // compute altitude (distance from satellite to ground point)
+        const vec = Cesium.Cartesian3.subtract(satPos, ground, new Cesium.Cartesian3());
+        const altitude = Cesium.Cartesian3.magnitude(vec); // meters
+
+        // read UI inputs
+        const pixsize_um = parseFloat(document.getElementById('pixsize').value) || 5.0; // micrometers
+        const focal = parseFloat(document.getElementById('focal').value) || 0.05; // meters
+        const p_width = parseInt(document.getElementById('p_width').value) || 4096;
+        const p_height = parseInt(document.getElementById('p_height').value) || 4096;
+
+        // Convert pixel size to meters
+        const pixsize = pixsize_um * 1e-6;
+        const gsd_m = altitude * pixsize / focal;
+        const footprintW = gsd_m * p_width;
+        const footprintH = gsd_m * p_height;
+
+        // Draw a rectangle at the ground point for the full pixel array
+        const halfW = footprintW/2.0;
+        const halfH = footprintH/2.0;
+        const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(ground);
+        const cornersENU = [
+          new Cesium.Cartesian3(-halfW, -halfH, 0),
+          new Cesium.Cartesian3( halfW, -halfH, 0),
+          new Cesium.Cartesian3( halfW,  halfH, 0),
+          new Cesium.Cartesian3(-halfW,  halfH, 0)
+        ];
+        const coords = cornersENU.map(c => Cesium.Matrix4.multiplyByPoint(enuMatrix, c, new Cesium.Cartesian3()));
+
+        // update polygon
+        if (!gsdPolygon) {
+          gsdPolygon = viewer.entities.add({
+            name: 'GSD footprint',
+            polygon: {
+              hierarchy: coords,
+              material: Cesium.Color.YELLOW.withAlpha(0.5),
+              outline: true,
+              outlineColor: Cesium.Color.YELLOW,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+            }
+          });
+        } else {
+          gsdPolygon.polygon.hierarchy = new Cesium.ConstantProperty(new Cesium.PolygonHierarchy(coords));
+        }
+
+        // store corners for callbacks
+        cornersCartesian = coords.slice();
+
+        const dashMat = new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.YELLOW });
+        const dashMatDepth = new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.YELLOW.withAlpha(0.95) });
+        for (let i=0;i<4;i++){
+          if (!gsdLines[i]){
+            const idx = i;
+            const lineEnt = viewer.entities.add({
+              name: 'GSD corner line',
+              polyline: {
+                positions: new Cesium.CallbackProperty(function(time, result) {
+                  const satNow = sat.entity.position.getValue(time);
+                  const corner = cornersCartesian[idx] || coords[idx];
+                  // return two Cartesian3 points for corner and satellite
+                  return [corner, satNow];
+                }, false),
+                width: 2,
+                material: dashMat,
+                depthFailMaterial: dashMatDepth,
+                clampToGround: false,
+                arcType: Cesium.ArcType.NONE
+              }
+            });
+            gsdLines[idx] = lineEnt;
+          }
+        }
+
+    // update info box text
+    const footprintW_km = footprintW / 1000.0;
+    const footprintH_km = footprintH / 1000.0;
+    const altitude_km = altitude / 1000.0;
+    document.getElementById('info').innerHTML = `GSD: ${gsd_m.toFixed(6)} m/px — Footprint: ${footprintW_km.toFixed(2)} km × ${footprintH_km.toFixed(2)} km — Altitude: ${altitude_km.toFixed(0)} km`;
+        } catch (e) {
+            console.log('GSD update error', e);
+        }
+        }
+
+  // Update polygon
+  updateGsdPolygon();
+  setInterval(updateGsdPolygon, 200);
+
+  </script>
+</body>
+</html>
