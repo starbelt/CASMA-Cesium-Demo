@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Satellite Sun Visability</title>
+  <title>Satellite Sun Visibility</title>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Cesium.js"></script>
   <link href="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
   <script src="https://unpkg.com/satellite.js/dist/satellite.min.js"></script> <!-- satellite, used for propogation -->
@@ -120,7 +120,6 @@
         interpolationDegree: 5
       });
 
-      // The label text will be dynamically updated to show both name and sun visible
         return viewer.entities.add({
           name: name,
           availability: new Cesium.TimeIntervalCollection([
@@ -129,7 +128,7 @@
           position: position,
           point: { pixelSize: 10, color: color },
           label: {
-            text: name, // will be updated dynamically
+            text: name,
             font: "bold 16px sans-serif",
             showBackground: true,
             backgroundColor: new Cesium.Color(0, 0, 0, 0.7),
