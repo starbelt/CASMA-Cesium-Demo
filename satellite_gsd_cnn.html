@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Cesium Satellite GSD</title>
+  <title>Cesium Satellite GSD + CNN</title>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Cesium.js"></script>
   <link href="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
   <script src="https://unpkg.com/satellite.js/dist/satellite.min.js"></script> <!-- satellite, used for propogation -->
@@ -19,7 +19,9 @@
       padding: 8px;
       border-radius: 6px;
       font-family: sans-serif;
-      z-index: 1;
+      z-index: 1000;
+      max-height: 120vh;
+      overflow: auto;
     }
   </style>
 </head>
@@ -27,16 +29,33 @@
   <div id="cesiumContainer"></div>
   <div class="overlay">
     <div style="margin-bottom:8px;font-weight:bold">Satellite GSD Viewer and Tile Processor</div>
-  <div style="font-size:13px;margin-bottom:6px">
-    Pixel size (&mu;m): <input id="pixsize" type="number" value="5" step="0.1" style="width:80px"/>
-  </div>
-  <div style="font-size:13px;margin-bottom:6px">
-    Pixel count: 
-    <input id="p_width" type="number" value="4096" min="1" step="1" style="width:80px"/> &times; 
-    <input id="p_height" type="number" value="4096" min="1" step="1" style="width:80px"/>
-  </div>
-  <div style="font-size:13px;margin-bottom:6px">Focal length (m): <input id="focal" type="number" value="0.05" step="0.001" style="width:100px"/></div>
-    <div id="info" style="margin-top:8px;font-size:12px;line-height:1.3"></div>
+      <div style="font-size:13px;margin-bottom:6px">
+      This tool lets you visualize Ground Sample Distance (GSD) and process satellite image tiles.  <br>
+      Yellow is the satellites current view. Light Purple is captured frames that are not processed. <br>
+      Tiles in the frame will turn blue once processed.<br>
+    </div>
+    <div style="font-size:13px;margin-bottom:6px">
+      Pixel size (&mu;m): <input id="pixsize" type="number" value="2" step="0.1" style="width:80px"/>
+    </div>
+    <div style="font-size:13px;margin-bottom:6px">
+      Pixel count: 
+      <input id="p_width" type="number" value="4096" min="1" step="1" style="width:80px"/> &times; 
+      <input id="p_height" type="number" value="4096" min="1" step="1" style="width:80px"/>
+    </div>
+    <div style="font-size:13px;margin-bottom:6px">Focal length (m): <input id="focal" type="number" value="0.2" step="0.001" style="width:100px"/></div>
+    <div style="font-size:13px;margin-bottom:6px">
+        Operation count (billion ops/tile): <input id="opCount" type="number" value="1.4" step="0.1" style="width:80px"/> &nbsp; 
+        GOPS (giga-ops/sec): <input id="gops" type="number" value="1" step="1" style="width:80px"/>
+    </div>
+    <div style="font-size:13px;margin-bottom:6px">
+        Tiles: 
+        <input id="tileRows" type="number" value="16" min="1" style="width:50px"/> &times;
+        <input id="tileCols" type="number" value="16" min="1" style="width:50px"/>
+    </div>
+    <div style="font-size:13px;margin-bottom:6px">
+      <button  id="applyBtn" style="width:140px">Apply & Restart</button>
+          <div id="info" style="margin-top:8px;font-size:12px;line-height:1.3"></div>
+    </div>
   </div>
   
   <script>
@@ -156,6 +175,7 @@
     viewer.clock.currentTime = start.clone();
     viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
     viewer.clock.multiplier = 1;
+    viewer.clock.shouldAnimate = true; 
     viewer.timeline.zoomTo(start, stop);
 
   // GSD footprint polygon (updates every second)
@@ -177,14 +197,11 @@
         const vec = Cesium.Cartesian3.subtract(satPos, ground, new Cesium.Cartesian3());
         const altitude = Cesium.Cartesian3.magnitude(vec); // meters
 
-        // read UI inputs
-        const pixsize_um = parseFloat(document.getElementById('pixsize').value) || 5.0; // micrometers
-        const focal = parseFloat(document.getElementById('focal').value) || 0.05; // meters
-        const p_width = parseInt(document.getElementById('p_width').value) || 4096;
-        const p_height = parseInt(document.getElementById('p_height').value) || 4096;
-
-        // Convert pixel size to meters
-        const pixsize = pixsize_um * 1e-6;
+        // Use values from simConfig (copied when user clicks Apply)
+        const pixsize = (simConfig.pixsize_um || 2.0) * 1e-6; // µm -> m
+        const focal = simConfig.focal || 0.2; // meters
+        const p_width = simConfig.p_width || 4096;
+        const p_height = simConfig.p_height || 4096;
         const gsd_m = altitude * pixsize / focal;
         const footprintW = gsd_m * p_width;
         const footprintH = gsd_m * p_height;
@@ -265,25 +282,72 @@
 
   // Store captured frames
   const capturedFrames = [];
+  // Store runtime configuration (copied from inputs when user clicks Apply)
+  const simConfig = {
+  pixsize_um: 2.0,
+  focal: 0.2,
+  p_width: 4096,
+  p_height: 4096,
+  opCount: 1.4,
+  gops: 1.0,
+  tileRows: 16,
+  tileCols: 16
+  };
 
-  // User tile count
-  let tileRows = 4;
-  let tileCols = 4;
+  // Wire Apply & Restart button: copy UI values into simConfig and restart
+  document.getElementById('applyBtn').addEventListener('click', () => {
+    simConfig.pixsize_um = parseFloat(document.getElementById('pixsize').value) || simConfig.pixsize_um;
+    simConfig.focal = parseFloat(document.getElementById('focal').value) || simConfig.focal;
+    simConfig.p_width = parseInt(document.getElementById('p_width').value) || simConfig.p_width;
+    simConfig.p_height = parseInt(document.getElementById('p_height').value) || simConfig.p_height;
+    simConfig.opCount = parseFloat(document.getElementById('opCount').value) || simConfig.opCount;
+    simConfig.gops = parseFloat(document.getElementById('gops').value) || simConfig.gops;
+    simConfig.tileRows = parseInt(document.getElementById('tileRows').value) || simConfig.tileRows;
+    simConfig.tileCols = parseInt(document.getElementById('tileCols').value) || simConfig.tileCols;
 
-  // UI input for tile processsing
-  const cnnInput = document.createElement('div');
-  cnnInput.innerHTML = `
-      <div style="font-size:13px;margin-bottom:6px">  Operation count (billion ops/tile): <input id="opCount" type="number" value="1.4" step="0.1" style="width:80px"/> &nbsp; GOPS (giga-ops/sec): <input id="gops" type="number" value="1" step="1" style="width:80px"/></div>
-      <div style="font-size:13px;margin-bottom:6px">
-          Tiles: 
-          <input id="tileRows" type="number" value="${tileRows}" min="1" style="width:50px"/> ×
-          <input id="tileCols" type="number" value="${tileCols}" min="1" style="width:50px"/>
-      </div>
-  `;
-  // Append the CNN/tile UI block
-  document.querySelector('.overlay').appendChild(cnnInput);
-  document.getElementById('tileRows').addEventListener('change', e => tileRows = parseInt(e.target.value));
-  document.getElementById('tileCols').addEventListener('change', e => tileCols = parseInt(e.target.value));
+    resetSimulation();
+  });
+
+  // Wire the top-level Apply button (outside overlay) to trigger the same action
+  const topApply = document.getElementById('applyBtnTop');
+  if (topApply) {
+    topApply.addEventListener('click', () => {
+      // Trigger the same behavior as the overlay button
+      document.getElementById('applyBtn').click();
+    });
+  }
+
+  // Reset simulation state: remove captured frame entities and tiles, clear queue, reset clock
+  function resetSimulation() {
+    // Remove existing frame and tile entities
+    capturedFrames.forEach(frame => {
+      try {
+        if (frame.polygon) viewer.entities.remove(frame.polygon);
+        if (frame.tiles && frame.tiles.length) {
+          frame.tiles.forEach(t => {
+            try {
+              if (!t) return;
+              // t may be an entity (old format) or an object { polygon, outline }
+              if (t.polygon) viewer.entities.remove(t.polygon);
+              else viewer.entities.remove(t);
+              if (t.outline) viewer.entities.remove(t.outline);
+            } catch (e) {
+              // ignore individual removal failures
+            }
+          });
+        }
+      } catch (e) {
+        console.log('Error removing entities during reset', e);
+      }
+    });
+    // Clear capturedFrames
+    capturedFrames.length = 0;
+
+    // Reset Cesium clock to start time and play
+    viewer.clock.currentTime = start.clone();
+    viewer.clock.shouldAnimate = true;
+    viewer.clock.multiplier = 1.0;   
+  }
 
   function captureFrame() {
       const sat = satEntities[tleData[0].name];
@@ -297,11 +361,11 @@
       const vec = Cesium.Cartesian3.subtract(satPos, ground, new Cesium.Cartesian3());
       const altitude = Cesium.Cartesian3.magnitude(vec); // meters
 
-      const pixsize_um = parseFloat(document.getElementById('pixsize').value) || 5.0;
-      const focal = parseFloat(document.getElementById('focal').value) || 0.05;
-      const p_width = parseInt(document.getElementById('p_width').value) || 4096;
-      const p_height = parseInt(document.getElementById('p_height').value) || 4096;
-      const pixsize = pixsize_um * 1e-6;
+      // Use configuration values (copied when user clicks Apply)
+      const pixsize = (simConfig.pixsize_um || 5.0) * 1e-6;
+      const focal = simConfig.focal || 0.05;
+      const p_width = simConfig.p_width || 4096;
+      const p_height = simConfig.p_height || 4096;
       const gsd_m = altitude * pixsize / focal;
       const footprintW = gsd_m * p_width;
       const footprintH = gsd_m * p_height;
@@ -335,7 +399,7 @@
           name: 'Captured Frame',
           polygon: {
               hierarchy: corners,
-              material: Cesium.Color.RED.withAlpha(0.3),
+              material: Cesium.Color.PALEVIOLETRED.withAlpha(0.3),
               outline: true,
               outlineColor: Cesium.Color.BLUE,
               heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
@@ -344,39 +408,61 @@
 
       // Create tiles 
       const tiles = [];
-      for (let i = 0; i < tileRows; i++) {
-          for (let j = 0; j < tileCols; j++) {
-              // f = row fraction, g = column fraction
-              const f0 = i / tileRows, f1 = (i+1)/tileRows;
-              const g0 = j / tileCols, g1 = (j+1)/tileCols;
-        const left0 = Cesium.Cartesian3.lerp(corners[0], corners[3], f0, new Cesium.Cartesian3());
-        const left1 = Cesium.Cartesian3.lerp(corners[0], corners[3], f1, new Cesium.Cartesian3());
-        const right0 = Cesium.Cartesian3.lerp(corners[1], corners[2], f0, new Cesium.Cartesian3());
-        const right1 = Cesium.Cartesian3.lerp(corners[1], corners[2], f1, new Cesium.Cartesian3());
+      const TR = simConfig.tileRows || 4;
+      const TC = simConfig.tileCols || 4;
+      for (let i = 0; i < TR; i++) {
+        for (let j = 0; j < TC; j++) {
+          // f = row fraction, g = column fraction
+          const f0 = i / TR, f1 = (i+1)/TR;
+          const g0 = j / TC, g1 = (j+1)/TC;
+          const left0 = Cesium.Cartesian3.lerp(corners[0], corners[3], f0, new Cesium.Cartesian3());
+          const left1 = Cesium.Cartesian3.lerp(corners[0], corners[3], f1, new Cesium.Cartesian3());
+          const right0 = Cesium.Cartesian3.lerp(corners[1], corners[2], f0, new Cesium.Cartesian3());
+          const right1 = Cesium.Cartesian3.lerp(corners[1], corners[2], f1, new Cesium.Cartesian3());
 
-        const tileCorners = [
-          Cesium.Cartesian3.lerp(left0, right0, g0, new Cesium.Cartesian3()),
-          Cesium.Cartesian3.lerp(left0, right0, g1, new Cesium.Cartesian3()),
-          Cesium.Cartesian3.lerp(left1, right1, g1, new Cesium.Cartesian3()),
-          Cesium.Cartesian3.lerp(left1, right1, g0, new Cesium.Cartesian3())
-        ];
+          const tileCorners = [
+            Cesium.Cartesian3.lerp(left0, right0, g0, new Cesium.Cartesian3()),
+            Cesium.Cartesian3.lerp(left0, right0, g1, new Cesium.Cartesian3()),
+            Cesium.Cartesian3.lerp(left1, right1, g1, new Cesium.Cartesian3()),
+            Cesium.Cartesian3.lerp(left1, right1, g0, new Cesium.Cartesian3())
+          ];
 
-        const tileEntity = viewer.entities.add({
-          polygon: {
-            hierarchy: tileCorners,
-            material: Cesium.Color.RED.withAlpha(0.06),
-            outline: true,
-            outlineColor: Cesium.Color.BLACK,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
-          }
-        });
-              tiles.push(tileEntity);
-          }
-      }
+          const tileEntity = viewer.entities.add({
+            polygon: {
+              hierarchy: tileCorners,
+              material: Cesium.Color.PALEVIOLETRED.withAlpha(0.06),
+              outline: false,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+            }
+          });
 
-    // Compute processing time per tile based on user input
-    const opCount = parseFloat(document.getElementById('opCount').value) || 1.0; // billion ops per tile
-    const gops = parseFloat(document.getElementById('gops').value) || 1.0; // billion ops per second (GOPS)
+          // Create a thick black outline polyline 1 km above the tile to prevent entities from overlapping
+          const elevationMeters = 1000.0;
+          const elevatedCorners = tileCorners.map(corner => {
+            const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(corner);
+            carto.height = (carto.height || 0) + elevationMeters;
+            return Cesium.Ellipsoid.WGS84.cartographicToCartesian(carto);
+          });
+          // Close the loop by adding the first point at the end
+          const outlinePositions = elevatedCorners.concat([elevatedCorners[0]]);
+          const tileOutline = viewer.entities.add({
+            polyline: {
+              positions: outlinePositions,
+              width: 1,
+              material: Cesium.Color.BLACK,
+              clampToGround: false,
+              arcType: Cesium.ArcType.NONE
+            }
+          });
+
+          // Store as an object so both polygon and outline can be managed
+          tiles.push({ polygon: tileEntity, outline: tileOutline });
+            }
+        }
+
+    // Compute processing time per tile based on simConfig values
+    const opCount = simConfig.opCount || 1.0; // billion ops per tile
+    const gops = simConfig.gops || 1.0; // billion ops per second (GOPS)
     // t_process in seconds: opCount / gops
     const t_process = (gops > 0) ? (opCount / gops) : Infinity;
     // Store frame info;
@@ -390,12 +476,12 @@
     // Only process one frame at a time: pick the oldest frame with unfinished tiles
     const frame = capturedFrames.find(f => f && f.processedTiles < f.totalTiles);
     if (!frame) return;
-
-    // If processing time is non-finite or zero, complete all times immediately
+    // If processing time is infinite or zero, complete all times immediately
     if (!isFinite(frame.t_process) || frame.t_process <= 0) {
       frame.processedTiles = frame.totalTiles;
       frame.tiles.forEach((t) => {
-        if (t && t.polygon) t.polygon.material = Cesium.Color.BLUE.withAlpha(0.6);
+          const poly = t && t.polygon ? t.polygon : t;
+          if (poly && poly.polygon) poly.polygon.material = Cesium.Color.BLUE.withAlpha(0.6);
       });
       return;
     }
@@ -404,20 +490,22 @@
     while (frame.processedTiles < frame.totalTiles && now >= frame.nextProcessTime) {
       const tileIdx = frame.processedTiles;
       const tileEntity = frame.tiles[tileIdx];
-      if (tileEntity && tileEntity.polygon) {
-        tileEntity.polygon.material = Cesium.Color.BLUE.withAlpha(0.6);
+      const polyEntity = tileEntity && tileEntity.polygon ? tileEntity.polygon : tileEntity;
+      if (polyEntity && polyEntity.polygon) {
+        polyEntity.polygon.material = Cesium.Color.BLUE.withAlpha(0.6);
       }
       frame.processedTiles += 1;
       frame.nextProcessTime += frame.t_process;
     }
 
-    // Update visuals for this frame: processed=blue, unprocessed stays red
+    // Update visuals for this frame: processed=blue, unprocessed stays palevioletred
     frame.tiles.forEach((t, idx) => {
-      if (t && t.polygon) {
+      const polyEntity = t && t.polygon ? t.polygon : t;
+      if (polyEntity && polyEntity.polygon) {
         if (idx < frame.processedTiles) {
-          t.polygon.material = Cesium.Color.BLUE.withAlpha(0.6);
+          polyEntity.polygon.material = Cesium.Color.BLUE.withAlpha(0.6);
         } else {
-          t.polygon.material = Cesium.Color.RED.withAlpha(0.1);
+          polyEntity.polygon.material = Cesium.Color.PALEVIOLETRED.withAlpha(0.1);
         }
       }
     });
