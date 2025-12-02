@@ -1,0 +1,444 @@
+    <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Ground Station Connectivity</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.133/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <script src="https://unpkg.com/satellite.js/dist/satellite.min.js"></script> <!-- satellite, used for propogation -->
+  <style>
+    html, body, #cesiumContainer {
+      width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+    }
+    .overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(0,0,0,0.5);
+      color: white;
+      padding: 8px;
+      border-radius: 6px;
+      font-family: sans-serif;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="cesiumContainer"></div>
+  <div class="overlay">
+    <label for="satSelect">Follow satellite:</label>
+    <select id="satSelect"></select>
+    <hr style="margin:6px 0; border-color: rgba(255,255,255,0.1)">
+    <div style="font-size:12px; margin-top:4px">Link parameters</div>
+    <div style="font-size:12px; margin-top:4px">
+      <label>TX Power (W): <input id="tx_w" type="number" step="any" value="50" style="width:90px"></label>
+      <label style="margin-left:8px">TX Gain (dB): <input id="tx_gain_db" type="number" step="any" value="10" style="width:70px"></label>
+    </div>
+    <div style="font-size:12px; margin-top:4px">
+      <label>Freq (MHz): <input id="freq_mhz" type="number" step="any" value="2400" style="width:100px"></label>
+      <label style="margin-left:8px">RX Gain (dB): <input id="rx_gain_db" type="number" step="any" value="15" style="width:70px"></label>
+    </div>
+    <div style="font-size:12px; margin-top:4px">
+      <label>Noise N0 (J): <input id="n0_j" type="number" step="any" value="1e-20" style="width:100px"></label>
+      <label style="margin-left:8px">BW (MHz): <input id="bw_mhz" type="number" step="any" value="1" style="width:100px"></label>
+    </div>
+  </div>
+
+  <script type="module">
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJmYWQ5NGJmMC05OWU3LTRhZTItODg4MC1jYWZhMDY4Y2UyZDMiLCJpZCI6MzM2NjY3LCJpYXQiOjE3NjI5OTk5NDd9.sCKJXm4vZEZ_yK9PY7O1jyvKZKFCihDSoeY98JZ6W_4';
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      timeline: true,
+      shouldAnimate: true,
+      animation: true
+    });
+ 
+    viewer.scene.globe.enableLighting = true; // Enables Dynamic Lighting
+
+  // TLEs
+  const tleData = [
+      { 
+        name: "ISS (LEO)",
+        tle1: "1 25544U 98067A   25335.57620885  .00008648  00000+0  16366-3 0  9999",
+        tle2: "2 25544  51.6309 197.7449 0003647 190.9481 169.1428 15.49226524541123",
+        color: Cesium.Color.BLUE,
+        info: `The International Space Station (ISS) is a large, habitable satellite in low Earth orbit, developed as a joint project between NASA, Roscosmos, ESA, JAXA, and CSA. 
+        Launched in stages starting in 1998, it serves as a microgravity laboratory for scientific research across various disciplines, including biology, physics, and astronomy.`
+      },
+      {
+        name: "NAVSTAR 83 (MEO)",
+        tle1: "1 62339U 24242A   25330.92836440 -.00000056  00000+0  00000+0 0  9996",
+        tle2: "2 62339  54.9285 342.3820 0011414 343.1444  20.6436  2.00567458  7201",
+        color: Cesium.Color.PURPLE,
+        info: `NAVSTAR 83, also known as GPS IIR-10 or SVN-47, is part of the U.S. Global Positioning System (GPS) satellite constellation. 
+        Launched on December 21, 2003, it provides precise positioning, navigation, and timing services for military and civilian users worldwide. 
+        As a Block IIR satellite, it introduced improvements in signal reliability and accuracy over previous generations.`
+      },
+      {
+        name: "GOES 19 (GEO)",
+        tle1: "1 60133U 24119A   25335.77458719 -.00000227  00000+0  00000+0 0  9996",
+        tle2: "2 60133   0.0159 141.7458 0001165 156.5209 336.2961  1.00271597  4984    ",
+        color: Cesium.Color.GREEN,
+        info: `GOES-19, formerly known as GOES-T, is a geostationary weather satellite operated by NOAA as part of the Geostationary Operational Environmental Satellite (GOES) system. 
+        Launched on March 1, 2022, it monitors weather conditions, severe storms, wildfires, and solar activity across the Western Hemisphere. 
+        GOES-19 provides advanced imagery and atmospheric data crucial for weather forecasting and disaster response.`
+      },
+    ];
+
+    // Convert ECI (km) → Cesium Cartesian3 ECEF (m)
+    function eciToCesium(eci, gmst) {
+      const ecf = satellite.eciToEcf(eci, gmst);
+      return new Cesium.Cartesian3(
+        ecf.x * 1000,
+        ecf.y * 1000,
+        ecf.z * 1000
+      );
+    }
+
+    // Create dynamic satellite entity
+    function createSatelliteEntity(satrec, name, color, start) {
+      const position = new Cesium.SampledPositionProperty();
+      const stop = Cesium.JulianDate.addHours(start, 24, new Cesium.JulianDate());
+
+      // Sample positions every minute for 24 hours
+      for (let i = 0; i <= 24*60; i++) {
+        const time = Cesium.JulianDate.addMinutes(start, i, new Cesium.JulianDate());
+        const jsDate = Cesium.JulianDate.toDate(time);
+
+        const pv = satellite.propagate(
+          satrec,
+          jsDate.getUTCFullYear(),
+          jsDate.getUTCMonth() + 1,
+          jsDate.getUTCDate(),
+          jsDate.getUTCHours(),
+          jsDate.getUTCMinutes(),
+          jsDate.getUTCSeconds()
+        );
+
+        if (pv.position) {
+          const gmst = satellite.gstime(jsDate);
+          const pos = eciToCesium(pv.position, gmst);
+          position.addSample(time, pos);
+        }
+      }
+
+      position.setInterpolationOptions({
+        interpolationAlgorithm: Cesium.LagrangePolynomialApproximation,
+        interpolationDegree: 5
+      });
+
+        return viewer.entities.add({
+          name: name,
+          availability: new Cesium.TimeIntervalCollection([
+            new Cesium.TimeInterval({ start, stop })
+          ]),
+          position: position,
+          point: { pixelSize: 10, color: color },
+          label: {
+            text: name,
+            font: "bold 16px sans-serif",
+            showBackground: true,
+            backgroundColor: new Cesium.Color(0, 0, 0, 0.7),
+            pixelOffset: new Cesium.Cartesian2(0, -40)
+          },
+          path: {
+            show: true,
+            leadTime: 0,
+            trailTime: 60*12,
+            width: 2,
+            material: color
+          },
+          description: arguments[4] || ''
+        });
+    }
+    
+    // Hard-coded UTC date: 2025-12-1
+    const fixedDateUTC = new Date(Date.UTC(2025, 11, 1, 12, 26, 30));  // months is 0-indexed
+    const start = Cesium.JulianDate.fromDate(fixedDateUTC);
+    const stop = Cesium.JulianDate.addHours(start, 24, new Cesium.JulianDate());
+
+    // Cesium clock
+    viewer.clock.startTime = start.clone();
+    viewer.clock.stopTime = stop.clone();
+    viewer.clock.currentTime = start.clone();
+    viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+    viewer.clock.multiplier = 1;
+    viewer.clock.shouldAnimate = true;
+    viewer.timeline.zoomTo(start, stop);
+
+
+    // Store entities by name
+    const satEntities = {};
+    tleData.forEach(sat => {
+      const satrec = satellite.twoline2satrec(sat.tle1, sat.tle2);
+      const entity = createSatelliteEntity(satrec, sat.name, sat.color, start, sat.info);
+      satEntities[sat.name] = { entity, satrec };
+    });
+
+    // Populate dropdown
+    const satSelect = document.getElementById('satSelect');
+    tleData.forEach(sat => {
+      const opt = document.createElement('option');
+      opt.value = sat.name;
+      opt.textContent = sat.name;
+      satSelect.appendChild(opt);
+    });
+
+    // Camera follow logic
+    function followSatellite(name) {
+      const sat = satEntities[name];
+      if (sat) {
+        viewer.trackedEntity = sat.entity;
+      }
+    }
+    satSelect.addEventListener('change', e => followSatellite(e.target.value));
+    // Default to ISS
+    followSatellite(tleData[0].name);
+
+    // Add KSAT Ground Stations (Used ChatGPT to help generate lat, lon, and alt. This was not verified!)
+    // Took list from: https://www.ksat.no/ground-network-services/the-ksat-global-ground-station-network/
+    // Then removed groundstations that were too close to each other to decrease computation time.
+    const groundStations = [
+    // Antarctic / Polar
+    { name: "Troll, Antarctic",                lon: 2.5333,     lat: -72.0167,  alt: 1270 },
+
+    // South America
+    { name: "Cordoba, Argentina",              lon: -64.46091,  lat: -31.52291, alt: 440 },
+    { name: "Punta Arenas, Chile",             lon: -70.91707,  lat: -53.16383, alt: 28 },
+    { name: "Panama",                          lon: -79.51987,  lat: 8.9823792,  alt: 0 },
+
+    // North America
+    { name: "Fairbanks, Alaska",               lon: -147.77675, lat: 64.835365, alt: 0 },
+    { name: "Los Angeles, California",         lon: -118.243683, lat: 34.052235, alt: 0 },
+    { name: "Hawaii, United States",           lon: -157.85833, lat: 21.3069444, alt: 0 },
+
+    // Europe / North Atlantic
+    { name: "Nemea, Greece",                   lon: 22.662742, lat: 37.820767, alt: 0 },
+    { name: "Nuuk, Greenland",                 lon: -51.7216,  lat: 64.1835,   alt: 0 },
+    { name: "Azores, Portugal",                lon: -25.68059, lat: 37.74283,  alt: 0 },
+
+    // Norway / Svalbard region
+    { name: "Svalbard, Norway",                lon: 15.64689,  lat: 78.22334,  alt: 500 },
+
+    // Africa
+    { name: "Mauritius",                       lon: 57.501222, lat: -20.160891, alt: 0 },
+    { name: "Hartebeesthoek, South Africa",    lon: 27.685393, lat: -25.889751, alt: 1406.822 },
+
+    // Asia / Oceania
+    { name: "Bangalore, India",                lon: 77.512,    lat: 13.034,     alt: 823 },
+    { name: "Tokyo, Japan",                    lon: 139.69222, lat: 35.68972,   alt: 0 },
+    { name: "Singapore",                       lon: 103.8198,  lat: 1.3521,     alt: 0 },
+    { name: "Dubai, United Arab Emirates",     lon: 55.296249, lat: 25.276987,  alt: 0 },
+    { name: "Awarua, New Zealand",             lon: 168.3600,  lat: -46.4940,   alt: 30 },
+
+    // Europe
+    { name: "Puertollano, Spain",              lon: -4.112146, lat: 38.686035,  alt: 0 }
+    ];
+
+    // Add Ground Station to Cesium viewer
+    groundStations.forEach(gs => {
+    viewer.entities.add({
+        name: gs.name,
+        position: Cesium.Cartesian3.fromDegrees(gs.lon, gs.lat, gs.alt),
+        point: {
+        pixelSize: 10,
+        color: Cesium.Color.CYAN,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 1
+        },
+        label: {
+        text: `KSAT - ${gs.name}`,
+        font: "14px sans-serif",
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -12)
+        }
+    });
+    });
+
+    // Communication link entities
+    const satLinks = {};
+    let lastUpdateMs = 0;
+
+    function readInputNumber(id, fallback){
+      const el = document.getElementById(id);
+      if(!el) return fallback;
+      const v = parseFloat(el.value);
+      return Number.isFinite(v) ? v : fallback;
+    }
+
+    function dbToCoeff(db){ return Math.pow(10.0, db/10.0); }
+
+    // Max Bitrate Function
+    function computeMaxBitrate(tx_w, tx_gain_db, freq_hz, dist_km, rx_gain_db, n0_j, bw_hz){
+      const C = 2.99792458e8;
+      const l_l = dbToCoeff(-1.0);
+      const g_t = dbToCoeff(tx_gain_db);
+      const wl = C / freq_hz;
+      const dist_m = dist_km * 1000.0;
+      const l_a = dbToCoeff(0.0);
+      const g_r = dbToCoeff(rx_gain_db);
+      const c = tx_w * l_l * g_t * Math.pow(wl/(4.0*Math.PI*dist_m), 2.0) * l_a * g_r;
+      const n = n0_j * bw_hz;
+      const r_max = bw_hz * (Math.log(1.0 + c/n) / Math.log(2));
+      return Math.floor(r_max);
+    }
+
+    // Create empty link entities for each satellite
+    tleData.forEach(sat => {
+      const name = sat.name;
+      const polyPositions = new Cesium.CallbackProperty(function(time, result){
+        const linkObj = satLinks[name];
+        if(!linkObj || !linkObj.best) return null;
+        const satEnt = satEntities[name] && satEntities[name].entity;
+        if(!satEnt) return null;
+        const satPos = satEnt.position && satEnt.position.getValue(time);
+        if(!satPos) return null;
+        const gs = linkObj.best.gs;
+        const gsPos = Cesium.Cartesian3.fromDegrees(gs.lon, gs.lat, gs.alt);
+        return [gsPos, satPos];
+      }, false);
+
+      const midPosition = new Cesium.CallbackProperty(function(time, result){
+        const linkObj = satLinks[name];
+        if(!linkObj || !linkObj.best) return null;
+        const satEnt = satEntities[name] && satEntities[name].entity;
+        if(!satEnt) return null;
+        const satPos = satEnt.position && satEnt.position.getValue(time);
+        if(!satPos) return null;
+        const gs = linkObj.best.gs;
+        const gsPos = Cesium.Cartesian3.fromDegrees(gs.lon, gs.lat, gs.alt);
+        return Cesium.Cartesian3.midpoint(gsPos, satPos, new Cesium.Cartesian3());
+      }, false);
+
+      const ent = viewer.entities.add({
+        name: `${name} link`,
+        polyline: {
+          arcType: Cesium.ArcType.NONE,
+          positions: polyPositions,
+          width: 3,
+          material: new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.95)),
+          depthFailMaterial: new Cesium.PolylineGlowMaterialProperty({
+            glowPower: 0.2,
+            color: Cesium.Color.YELLOW.withAlpha(0.6)
+          })
+        },
+        position: midPosition,
+        label: {
+          text: '',
+          font: '14px sans-serif',
+          fillColor: Cesium.Color.WHITE,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          outlineColor: Cesium.Color.BLACK,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          pixelOffset: new Cesium.Cartesian2(0, -10),
+          show: false
+        }
+      });
+
+      satLinks[name] = { entity: ent, best: null };
+    });
+
+    // Compute range (km) and elevation of satellite from a ground station
+    function satElevationAndRange(satrec, date, gs){
+      const jsDate = date; // JS Date
+      const pv = satellite.propagate(
+        satrec,
+        jsDate.getUTCFullYear(), jsDate.getUTCMonth()+1, jsDate.getUTCDate(),
+        jsDate.getUTCHours(), jsDate.getUTCMinutes(), jsDate.getUTCSeconds()
+      );
+      if(!pv || !pv.position) return null;
+      const gmst = satellite.gstime(jsDate);
+      const posEcf = satellite.eciToEcf(pv.position, gmst); // km
+
+      const obsGd = { latitude: satellite.degreesToRadians(gs.lat), longitude: satellite.degreesToRadians(gs.lon), height: gs.alt/1000.0 };
+      const obsEcf = satellite.geodeticToEcf(obsGd); // km
+
+      const rx = posEcf.x - obsEcf.x;
+      const ry = posEcf.y - obsEcf.y;
+      const rz = posEcf.z - obsEcf.z;
+      const rangeKm = Math.sqrt(rx*rx + ry*ry + rz*rz);
+
+      // Elevation
+      const look = satellite.ecfToLookAngles(obsGd, posEcf);
+      const elevDeg = look.elevation * (180.0/Math.PI);
+
+      return { elevationDeg: elevDeg, rangeKm: rangeKm, satEcf: posEcf };
+    }
+
+    // Update links each tick: Pick closest GS with elevation >= 10 deg
+    function updateLinks(clock){
+      try{
+        // Updates bitrate number once per 200ms
+        const nowMs = Date.now();
+        if(nowMs - lastUpdateMs < 200) return;
+        lastUpdateMs = nowMs;
+
+        const currentTime = Cesium.JulianDate.toDate(viewer.clock.currentTime);
+
+        // Gather communications params from inputs
+        const tx_w = readInputNumber('tx_w', 50);
+        const tx_gain_db = readInputNumber('tx_gain_db', 10);
+        const freq_mhz = readInputNumber('freq_mhz', 2400);
+        const freq_hz = freq_mhz * 1.0e6;
+        const rx_gain_db = readInputNumber('rx_gain_db', 15);
+        const n0_j = readInputNumber('n0_j', 1e-20);
+        const bw_mhz = readInputNumber('bw_mhz', 1);
+        const bw_hz = bw_mhz * 1.0e6;
+
+      Object.keys(satEntities).forEach(satName => {
+        const satobj = satEntities[satName];
+        const satrec = satobj.satrec;
+
+        let best = null; // {gs, elev, rangeKm}
+        groundStations.forEach(gs => {
+          const info = satElevationAndRange(satrec, currentTime, gs);
+          if(!info) return;
+          if(info.elevationDeg >= 10.0){
+            if(!best || info.rangeKm < best.rangeKm){
+              best = { gs: gs, elevationDeg: info.elevationDeg, rangeKm: info.rangeKm, satEcf: info.satEcf };
+            }
+          }
+        });
+
+        const linkObj = satLinks[satName];
+        if(!linkObj) return;
+        if(best){
+          // Store chosen GS
+          linkObj.best = best;
+          // Update link line color and satellite bitrate label
+          if(linkObj.entity && linkObj.entity.polyline){
+            linkObj.entity.polyline.material = new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.6));
+          }
+          const bitrate = computeMaxBitrate(tx_w, tx_gain_db, freq_hz, best.rangeKm, rx_gain_db, n0_j, bw_hz);
+          const satEntity = satEntities[satName] && satEntities[satName].entity;
+          if(satEntity && satEntity.label){
+            satEntity.label.text = satName + '\n' + bitrate.toLocaleString() + ' bps';
+          }
+          if(linkObj.entity && linkObj.entity.label){
+            linkObj.entity.label.show = false;
+          }
+        } else {
+          // Clear last GS so CallbackProperty returns null and hides the line
+          linkObj.best = null;
+          if(linkObj.entity && linkObj.entity.label) linkObj.entity.label.show = false;
+          // restore satellite label to just the name
+          const satEntity = satEntities[satName] && satEntities[satName].entity;
+          if(satEntity && satEntity.label){ satEntity.label.text = satName; }
+        }
+      });
+      }catch(err){
+        console.error('updateLinks error:', err);
+      }
+    }
+
+    // Run update on every clock tick
+    viewer.clock.onTick.addEventListener(updateLinks);
+    // initial update
+    updateLinks();
+  </script>
+</body>
+</html>
