@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CASMA Cesium Demos</title>
+
+<link rel="icon" href="https://cesium.com/docs/images/cesium_map.png">
+
+<style>
+:root{
+  --bg:#ffffff;
+  --card:#861f41;
+  --card-hover:#9c2a4f;
+  --text:#ffffff;
+  --muted:#f2d6dd;
+  --section:#e5751f;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;
+}
+
+body{
+  margin:0;
+  background:var(--bg);
+  color:#000;
+}
+
+header{
+  background:#861f41;
+  color:#ffffff;
+  padding:20px 5%;
+}
+
+.section-title{
+  width:90%;
+  margin:50px auto 12px auto;
+
+  color:var(--section);
+  font-size:28px;  
+  letter-spacing:0.5px;
+}
+
+.title{
+  color:#ffffff;
+}
+
+.excerpt{
+  color:var(--muted);
+}
+
+/* GRID */
+.demos{
+  width:90%;
+  max-width:1400px;
+  margin:0 auto 60px auto;
+
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap:24px;
+}
+#demoGrid{
+  display:block;
+}
+/* CARD */
+.card{
+  background:var(--card);
+  border-radius:16px;
+  overflow:hidden;
+  cursor:pointer;
+  transition:background .2s, box-shadow .2s;
+
+  display:flex;
+  flex-direction:column;
+
+  height:100%;
+  min-height:320px;
+}
+
+.card:hover{
+  background:var(--card-hover);
+  box-shadow:0 8px 20px rgba(0,0,0,0.25);
+}
+
+.card img.hero{
+  width:100%;
+  height:200px;
+  object-fit:cover;
+}
+
+/* content */
+.card-content{
+  padding:12px;
+  display:flex;
+  flex-direction:column;
+}
+
+.title{
+  font-size:15px;
+  font-weight:600;
+  line-height:1.3;
+}
+
+.card:hover .excerpt{
+  opacity:1;
+}
+
+.badge{
+  font-size:11px;
+  color:var(--muted);
+  margin-bottom:6px;
+}
+
+/* simple responsive fallback */
+@media(max-width:900px){
+  .demos{flex-direction:column;}
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>Computer Aided Space Mission Analysis - CesiumJS Demos</h1>
+  <div class="sub">
+    <span>Prepared for VT AOE 4414 by Tejas Vinod</span>
+  </div>
+</header>
+
+<div class="demos" id="demoGrid"></div>
+
+<script>
+const sections = [
+  {
+    title: "Orbit Demos",
+    items: [
+      {
+        title: "Blacksburg Horizon (TLE Satellites)",
+        file: "blacksburg_horizon.html",
+        img: "Images/blacksburg_horizon.png",
+        gif: "Images/blacksburg_horizon.gif",
+        desc: "Visualizes satellites using their TLE data, propagating their orbits for two hours and animating their paths, positions, and labels. The camera is anchored at a ground station in Blacksburg, offering a dynamic sky‑view of the satellites as they orbit."
+      },
+      {
+        title: "CZML Satellites",
+        file: "czml_satellites.html",
+        img: "Images/czml_satellites.png",
+        gif: "Images/czml_satellites.gif",
+        desc: "Loads a CZML file into CesiumJS and uses CzmlDataSource to render time‑dynamic satellite trajectories and positions. "
+      },
+      {
+        title: "ECEF vs ECI Frames",
+        file: "ecef_eci.html",
+        img: "Images/ecef_eci.png",
+        gif: "Images/ecef_eci.gif",
+        desc: "Visualizes the contrast between Earth‑Centered Earth‑Fixed (ECEF) and Earth‑Centered Inertial (ECI) frames by drawing both sets of axes and animating the rotating ECI axes with the direction to the First Point of Aries. "
+      },
+      {
+        title: "Kepler’s Second Law",
+        file: "kepler_second_law.html",
+        img: "Images/kepler_second_law.png",
+        gif: "Images/kepler_second_law.gif",
+        desc: "Visualizes Kepler’s Second Law (Equal Areas in Equal Times) by showing a satellite sweeping equal-area sectors around the focus of an elliptical orbit."
+      }
+    ]
+  },
+
+  {
+    title: "Power Demos",
+    items: [
+      {
+        title: "Sun Visibility for Satellites",
+        file: "satellite_sun_visibility.html",
+        img: "Images/satellite_sun_visibility.png",
+        gif: "Images/satellite_sun_visibility.gif",
+        desc: "Visualizes whether satellites are illuminated by the Sun or in Earth’s shadow by computing the fraction of the Sun visible from each satellite."
+      },
+      {
+        title: "Sun Vector from Satellite",
+        file: "sun_vector.html",
+        img: "Images/sun_vector.png",
+        gif: "Images/sun_vector.gif",
+        desc: "Propagates a satellite’s Keplerian orbit and continuously computes the Sun’s geocentric position, drawing a dynamic vector from the satellite toward the Sun as both bodies move"
+      }
+    ]
+  },
+
+  {
+    title: "Communication & Computation Demos",
+    items: [
+      {
+        title: "Ground Station Link Simulation",
+        file: "ground_station.html",
+        img: "Images/ground_station.png",
+        gif: "Images/ground_station.gif",
+        desc: "Simulates satellite communication with ground stations by visualizing satellite orbits and dynamically selecting the closest KSAT ground station with elevation ≥ 10°."
+      },
+      {
+        title: "Satellite GSD Visualization",
+        file: "satellite_gsd.html",
+        img: "Images/satellite_gsd.png",
+        gif: "Images/satellite_gsd.gif",
+        desc: "Visualizes satellite imaging geometry by computing and displaying ground sample distance (GSD) and the corresponding ground footprint of a satellite sensor in Cesium."
+      },
+      {
+        title: "Satellite GSD + CNN Processing",
+        file: "satellite_gsd_cnn.html",
+        img: "Images/satellite_gsd_cnn.png",
+        gif: "Images/satellite_gsd_cnn.gif",
+        desc: "Simulates satellite imaging and onboard image processing by visualizing ground sample distance (GSD), sensor footprints, and tile-based CNN processing of captured imagery."
+      }
+    ]
+  }
+];
+
+function renderSections() {
+  const container = document.getElementById("demoGrid");
+  container.innerHTML = "";
+
+  sections.forEach(section => {
+    // title
+    const title = document.createElement("div");
+    title.className = "section-title";
+    title.textContent = section.title;
+    container.appendChild(title);
+
+    // row container
+    const grid = document.createElement("div");
+    grid.className = "demos";
+    container.appendChild(grid);
+
+    // cards
+    section.items.forEach(d => {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.onclick = () => window.location.href = d.file;
+
+      card.innerHTML = `
+        <img class="hero"
+          src="${d.img}"
+          data-static="${d.img}"
+          data-gif="${d.gif || d.img}">
+        <div class="card-content">
+          <div class="title">${d.title}</div>
+          <div class="excerpt">${d.desc}</div>
+        </div>
+      `;
+
+      grid.appendChild(card);
+    });
+  });
+}
+
+renderSections();
+window.addEventListener("resize", renderSections);
+
+document.addEventListener("mouseover", (e) => {
+  const img = e.target.closest(".card")?.querySelector(".hero");
+  if (!img) return;
+
+  const gif = img.dataset.gif;
+  if (gif) img.src = gif;
+});
+
+document.addEventListener("mouseout", (e) => {
+  const img = e.target.closest(".card")?.querySelector(".hero");
+  if (!img) return;
+
+  const original = img.dataset.static;
+  if (original) img.src = original;
+});
+</script>
+
+</body>
+</html>
