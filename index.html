@@ -208,6 +208,23 @@ const sections = [
   }
 ];
 
+function preloadGifs() {
+  const urls = [];
+
+  sections.forEach(section => {
+    section.items.forEach(item => {
+      if (item.gif) urls.push(item.gif);
+    });
+  });
+
+  urls.forEach(url => {
+    const img = new Image();
+    img.src = url;
+  });
+}
+
+preloadGifs();
+
 function renderSections() {
   const container = document.getElementById("demoGrid");
   container.innerHTML = "";
