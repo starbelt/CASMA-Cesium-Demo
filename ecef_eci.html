@@ -134,16 +134,16 @@
     addECIVector(origin, function(time) {
       const theta = -getSiderealAngle(time);
       return new Cesium.Cartesian3(length * Math.cos(theta), length * Math.sin(theta), 0);
-    }, Cesium.Color.YELLOW, "X");
+    }, Cesium.Color.YELLOW, "I");
 
     addECIVector(origin, function(time) {
       const theta = -getSiderealAngle(time);
       return new Cesium.Cartesian3(-length * Math.sin(theta), length * Math.cos(theta), 0);
-    }, Cesium.Color.CYAN, "Y");
+    }, Cesium.Color.CYAN, "J");
 
     addECIVector(origin, function(time) {
       return new Cesium.Cartesian3(0, 0, length);
-    }, Cesium.Color.MAGENTA, "Z");
+    }, Cesium.Color.MAGENTA, "K");
 
     // Animated Aries vector (longer, orange, labeled ♈︎)
     addECIVector(origin, function(time) {
@@ -151,9 +151,9 @@
       return new Cesium.Cartesian3(ariesLength * Math.cos(theta), ariesLength * Math.sin(theta), 0);
     }, Cesium.Color.ORANGE, "♈︎");
 
-    // Fly the camera so we start in between ECI X & Y
+    // Fly the camera so we start in between ECEF X and Y
     const theta = -getSiderealAngle(viewer.clock.currentTime);
-    const phi = theta + Math.PI / 4; // 45 degrees ahead of ECI X
+    const phi = theta + Math.PI / 4; // 45 degrees ahead of ECEF X
     const radius = 50_000_000; // 50,000 km from Earth's center
 
     const x = radius * Math.cos(phi);
